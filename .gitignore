@@ -1,0 +1,25 @@
+# This folder also holds the vendor SDK (marked PROPRIETARY AND CONFIDENTIAL by
+# Faraday Future), internal internship documents, and presentation media. So the
+# default is to ignore everything, and publish only my own code, explicitly.
+/*
+!.gitignore
+!README.md
+!navi-ios/
+!navi-web/
+
+# ── Never publish the API key ────────────────────────────────────────────
+navi-ios/NaviRemote/Secrets.swift
+
+# ── Presentation media: large binaries, not source ───────────────────────
+navi-ios/App_Presentation/media/*
+!navi-ios/App_Presentation/media/README.txt
+navi-ios/App_Presentation/*.pptx
+
+# ── Xcode ────────────────────────────────────────────────────────────────
+**/xcuserdata/
+**/DerivedData/
+**/*.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+.DS_Store
+
+# ── Local TLS cert for the phase-1 relay: regenerate, never publish ──────
+navi-web/certs/

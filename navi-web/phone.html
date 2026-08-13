@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Navi">
+<title>Navi Remote</title>
+<style>
+  :root {
+    --bg:#0e1116; --panel:#161b22; --panel2:#1c232d; --line:#2a3341; --fg:#e6edf3;
+    --dim:#8b98a5; --accent:#4aa3ff; --ok:#3fb950; --warn:#d29922; --bad:#f85149;
+    --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { overscroll-behavior:none; }
+  body {
+    margin:0; background:var(--bg); color:var(--fg); font:16px/1.4 -apple-system, sans-serif;
+    padding:env(safe-area-inset-top) 12px calc(env(safe-area-inset-bottom) + 12px);
+    user-select:none;
+  }
+  header { display:flex; align-items:center; gap:8px; padding:10px 0; }
+  h1 { font-size:16px; margin:0; font-weight:600; }
+  .chip { font-family:var(--mono); font-size:12px; padding:3px 9px; border-radius:99px;
+          background:var(--panel2); border:1px solid var(--line); }
+  .grow { flex:1; }
+
+  .estop {
+    width:100%; padding:18px; font-size:22px; font-weight:800; letter-spacing:1px;
+    background:var(--bad); color:#fff; border:none; border-radius:12px; margin-bottom:12px;
+  }
+  .estop:active { filter:brightness(1.25); }
+
+  .tiles { display:flex; gap:8px; margin-bottom:12px; }
+  .tile { flex:1; background:var(--panel); border:1px solid var(--line); border-radius:10px;
+          padding:10px; text-align:center; }
+  .tile b { display:block; font-size:26px; font-family:var(--mono); line-height:1.1; }
+  .tile span { font-size:11px; color:var(--dim); }
+
+  .pad { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-bottom:12px; }
+  .pad button {
+    height:74px; font-size:26px; background:var(--panel2); color:var(--fg);
+    border:1px solid var(--line); border-radius:12px; touch-action:none;
+  }
+  .pad button.on { background:var(--accent); color:#04121f; }
+  .pad .sp { visibility:hidden; }
+
+  .row { display:flex; gap:8px; flex-wrap:wrap; }
+  button.b { flex:1; padding:13px 8px; font-size:15px; background:var(--panel2); color:var(--fg);
+             border:1px solid var(--line); border-radius:10px; }
+  button.b:active { border-color:var(--accent); }
+  button.mic { background:var(--accent); color:#04121f; font-weight:700; }
+  button.mic.on { background:var(--ok); }
+
+  section { background:var(--panel); border:1px solid var(--line); border-radius:10px;
+            padding:12px; margin-bottom:12px; }
+  h2 { font-size:11px; text-transform:uppercase; letter-spacing:.8px; color:var(--dim);
+       margin:0 0 9px; font-weight:600; }
+  .kv { font-family:var(--mono); font-size:13px; }
+  .kv div { display:flex; justify-content:space-between; gap:10px; padding:2px 0; }
+  .kv span:first-child { color:var(--dim); }
+  input, select { width:100%; font:inherit; background:var(--panel2); color:var(--fg);
+                  border:1px solid var(--line); border-radius:8px; padding:10px; margin-top:6px; }
+  .note { font-size:12px; color:var(--dim); margin:8px 0 0; }
+  .banner { padding:10px; border-radius:8px; font-size:13px; margin-bottom:12px; border:1px solid; }
+  .banner.bad { background:#2d1214; border-color:var(--bad); color:#ffb3ae; }
+  .banner.warn { background:#2a2109; border-color:var(--warn); color:#f0d089; }
+  .banner[hidden] { display:none; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Navi Remote</h1>
+  <span class="chip" id="link">connecting…</span>
+  <span class="grow"></span>
+</header>
+
+<button class="estop" id="estop">■ E-STOP</button>
+
+<div class="banner bad" id="banGate" hidden></div>
+
+<div class="tiles">
+  <div class="tile"><b id="bat">—</b><span>battery %</span></div>
+  <div class="tile"><b id="est">—</b><span>e-stop bit</span></div>
+  <div class="tile"><b id="mot">—</b><span>motion</span></div>
+</div>
+
+<div class="pad">
+  <span class="sp"></span>
+  <button data-dir="up">▲</button>
+  <span class="sp"></span>
+  <button data-dir="left">◀</button>
+  <button data-dir="down">▼</button>
+  <button data-dir="right">▶</button>
+</div>
+
+<div class="row" style="margin-bottom:12px">
+  <button class="b" data-skill="stand_up">stand</button>
+  <button class="b" data-skill="sit_down">sit</button>
+  <button class="b" data-skill="lie_down">lie</button>
+  <button class="b" id="recover">recover</button>
+</div>
+
+<section>
+  <h2>Voice</h2>
+  <div class="banner bad" id="banVoice" hidden></div>
+  <div class="row">
+    <button class="b mic" id="mic">🎤 hold to talk</button>
+  </div>
+  <div class="kv" style="margin-top:10px">
+    <div><span>heard</span><span id="heard">—</span></div>
+    <div><span>intent</span><span id="intent">—</span></div>
+  </div>
+  <p class="note">
+    "Stop" is matched on this phone in code, before any network call — it never waits for
+    the model. Every voice command is time-limited by the Mac regardless of what is asked.
+  </p>
+</section>
+
+<section>
+  <h2>Settings</h2>
+  <select id="mode">
+    <option value="both" selected>keyword first, AI fallback</option>
+    <option value="keyword">keyword only (no internet needed)</option>
+    <option value="ai">AI only</option>
+  </select>
+  <input type="text" id="key" placeholder="OpenAI key sk-… (this tab only)" autocomplete="off"
+         autocapitalize="off" autocorrect="off" spellcheck="false">
+  <input type="text" id="model" value="gpt-4o-mini" autocapitalize="off" autocorrect="off"
+         spellcheck="false">
+  <p class="note">
+    Add to Home Screen (Share → Add to Home Screen) and this opens full-screen with its own
+    icon. Keep the Mac tab open — it holds the Bluetooth link to the robot.
+  </p>
+</section>
+
+<script src="phone.js"></script>
+</body>
+</html>

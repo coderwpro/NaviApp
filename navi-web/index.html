@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Navi BLE Web Remote — Day 1</title>
+<style>
+  :root {
+    --bg: #0e1116; --panel: #161b22; --panel-2: #1c232d; --line: #2a3341;
+    --fg: #e6edf3; --dim: #8b98a5; --accent: #4aa3ff; --ok: #3fb950;
+    --warn: #d29922; --bad: #f85149; --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  header {
+    position: sticky; top: 0; z-index: 10; display: flex; align-items: center;
+    gap: 12px; padding: 10px 16px; background: var(--panel);
+    border-bottom: 1px solid var(--line); flex-wrap: wrap;
+  }
+  h1 { font-size: 15px; margin: 0; font-weight: 600; letter-spacing: .2px; }
+  h2 { font-size: 12px; margin: 0 0 10px; text-transform: uppercase;
+       letter-spacing: .8px; color: var(--dim); font-weight: 600; }
+  h3 { font-size: 12px; margin: 14px 0 6px; color: var(--dim); font-weight: 600; }
+  .grow { flex: 1; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px;
+    border-radius: 999px; background: var(--panel-2); border: 1px solid var(--line);
+    font-size: 12px; font-family: var(--mono);
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--dim); }
+  .dot.on { background: var(--ok); } .dot.busy { background: var(--warn); }
+  .dot.off { background: var(--bad); }
+
+  button {
+    font: inherit; color: var(--fg); background: var(--panel-2);
+    border: 1px solid var(--line); border-radius: 6px; padding: 7px 12px;
+    cursor: pointer;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #04121f; font-weight: 600; }
+  button.estop {
+    background: var(--bad); border-color: var(--bad); color: #fff;
+    font-weight: 700; font-size: 15px; padding: 10px 22px; letter-spacing: .5px;
+  }
+  button.estop:hover { filter: brightness(1.15); border-color: #fff; }
+  button.warnbtn { border-color: var(--warn); color: var(--warn); }
+
+  main { display: grid; grid-template-columns: 320px 1fr 340px; gap: 12px; padding: 12px; align-items: start; }
+  @media (max-width: 1100px) { main { grid-template-columns: 1fr; } }
+  section { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; margin-bottom: 12px; }
+
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .kv { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; font-family: var(--mono); font-size: 13px; }
+  .kv span:nth-child(odd) { color: var(--dim); }
+  .big { font-size: 40px; font-weight: 700; font-family: var(--mono); line-height: 1.1; }
+  .unit { font-size: 16px; color: var(--dim); font-weight: 400; }
+  .bar { height: 8px; border-radius: 4px; background: var(--panel-2); overflow: hidden; margin: 8px 0 4px; }
+  .bar > i { display: block; height: 100%; background: var(--ok); width: 0; transition: width .3s; }
+
+  .note { font-size: 12px; color: var(--dim); margin: 8px 0 0; }
+  .banner { padding: 10px 12px; border-radius: 6px; font-size: 13px; margin-bottom: 12px; border: 1px solid; }
+  .banner.bad  { background: #2d1214; border-color: var(--bad);  color: #ffb3ae; }
+  .banner.warn { background: #2a2109; border-color: var(--warn); color: #f0d089; }
+  .banner.ok   { background: #10231a; border-color: var(--ok);   color: #93e0a4; }
+  .banner[hidden] { display: none; }
+
+  label.check { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; margin: 7px 0; cursor: pointer; }
+  label.check input { margin-top: 3px; flex: none; }
+
+  .pad { display: grid; grid-template-columns: repeat(3, 62px); grid-auto-rows: 52px; gap: 6px; justify-content: center; margin: 10px 0; }
+  .pad button { font-size: 18px; padding: 0; }
+  .pad .spacer { visibility: hidden; }
+  .held { background: var(--accent) !important; color: #04121f !important; }
+
+  log-view, .log {
+    display: block; height: 190px; overflow-y: auto; background: #0a0d12;
+    border: 1px solid var(--line); border-radius: 6px; padding: 8px;
+    font-family: var(--mono); font-size: 11.5px; line-height: 1.45; white-space: pre-wrap; word-break: break-all;
+  }
+  .log .t { color: #56646f; } .log .rx { color: #79c0ff; } .log .tx { color: #d2a8ff; }
+  .log .err { color: #ff9492; } .log .sys { color: var(--dim); } .log .good { color: #7ee787; }
+
+  .test { font-family: var(--mono); font-size: 12px; display: grid; grid-template-columns: auto 1fr; gap: 3px 8px; }
+  .pass { color: var(--ok); } .fail { color: var(--bad); }
+  code { font-family: var(--mono); background: var(--panel-2); padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+  input[type=text], select {
+    font: inherit; background: var(--panel-2); color: var(--fg);
+    border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px;
+  }
+  input[type=text] { width: 130px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Navi BLE Web Remote</h1>
+  <span class="chip"><i class="dot" id="dotConn"></i><span id="connState">disconnected</span></span>
+  <span class="chip" id="chipDev" hidden></span>
+  <span class="grow"></span>
+  <button class="estop" id="btnEstop" title="Space">■ E-STOP</button>
+  <button id="btnRecover">recover</button>
+</header>
+
+<main>
+
+<!-- ─────────────── LEFT: environment + connection ─────────────── -->
+<div>
+  <section>
+    <h2>1 · Environment</h2>
+    <div class="banner bad" id="banSecure" hidden>
+      Page is not a <b>secure context</b>. Web Bluetooth is disabled.<br>
+      Run <code>python3 -m http.server 8000</code> in this folder and open
+      <code>http://localhost:8000</code>. Opening the file directly (<code>file://</code>) never works.
+    </div>
+    <div class="banner bad" id="banSupport" hidden>
+      This browser has no <code>navigator.bluetooth</code>. Use <b>Chrome or Edge</b> on
+      desktop or Android. Safari / iPhone do not support Web Bluetooth at all.
+    </div>
+    <div class="banner ok" id="banEnvOk" hidden>Secure context + Web Bluetooth available.</div>
+  </section>
+
+  <section>
+    <h2>2 · Connection</h2>
+    <div class="row">
+      <button class="primary" id="btnConnect">Connect to NAVI</button>
+      <button id="btnRetry" hidden>Retry</button>
+      <button id="btnDisconnect" disabled>Disconnect</button>
+    </div>
+    <p class="note">
+      ~30–40% of connection attempts fail and sessions drop mid-run. That is a known
+      robot-side issue, not your code. Just hit Retry.
+    </p>
+    <h3>No robot around?</h3>
+    <button id="btnScanAll">List every BLE device nearby</button>
+    <p class="note">
+      Opens Chrome's own device chooser with no filter. If devices appear, your Web
+      Bluetooth path works — no robot needed. (The browser owns that list; a page can
+      only see the device you pick.)
+    </p>
+    <div class="banner warn" id="banPicked" hidden></div>
+  </section>
+
+  <section>
+    <h2>3 · Encoder self-test</h2>
+    <p class="note" style="margin-top:0">
+      Runs on load, no robot involved. Checks the 8-byte builder against the frames the
+      cheat sheet verified on hardware.
+    </p>
+    <div class="test" id="selfTest"></div>
+  </section>
+</div>
+
+<!-- ─────────────── MIDDLE: telemetry ─────────────── -->
+<div>
+  <section>
+    <h2>4 · Telemetry — read this before you drive</h2>
+    <div class="banner warn" id="banNoTelemetry">
+      No status frame received yet. Until a battery number is ticking here you cannot
+      tell a bad joystick frame apart from any other problem — that is where every lost
+      hour on this project went.
+    </div>
+
+    <div class="row" style="gap:28px; align-items:flex-end">
+      <div>
+        <div class="big"><span id="battery">—</span><span class="unit">%</span></div>
+        <div class="bar"><i id="batBar"></i></div>
+        <div class="note" style="margin:0">battery</div>
+      </div>
+      <div>
+        <div class="big" id="estopBit">—</div>
+        <div class="note" style="margin:0">e-stop latch (0 = clear, 1 = latched)</div>
+      </div>
+      <div>
+        <div class="big" id="motionState">—</div>
+        <div class="note" style="margin:0">motion_flag (1 = idle, 0 = busy)</div>
+      </div>
+    </div>
+
+    <div class="kv" style="margin-top:16px">
+      <span>action_id</span><span id="actionId">—</span>
+      <span>temperature</span><span id="temps">—</span>
+      <span>charging</span><span id="charging">—</span>
+      <span>status frames</span><span id="frameCount">0</span>
+      <span>last frame</span><span id="frameAge">—</span>
+      <span>last error</span><span id="lastError">—</span>
+    </div>
+
+    <p class="note">
+      <code>action_id</code> is displayed, never used as a gate. One healthy unit reports
+      <code>625</code>; blocking on <code>!== 4</code> would send zero frames to a robot
+      that is perfectly fine.
+    </p>
+  </section>
+
+  <section>
+    <h2>5 · Frame log</h2>
+    <div class="row" style="margin-bottom:8px">
+      <button id="btnClearLog">Clear</button>
+      <label class="check" style="margin:0"><input type="checkbox" id="chkLogStatus"><span>log every status frame (noisy, ~5 Hz)</span></label>
+    </div>
+    <div class="log" id="log"></div>
+  </section>
+</div>
+
+<!-- ─────────────── RIGHT: drive ─────────────── -->
+<div>
+  <section>
+    <h2>6 · Safety gate</h2>
+    <label class="check">
+      <input type="checkbox" id="ackSingle">
+      <span>Only <b>one</b> Navi is powered on within 30 m. (This link has no authentication —
+      2026-07-14, a robot in a shipping box 20–30 m away was driven by mistake until its
+      motors overheated.)</span>
+    </label>
+    <label class="check">
+      <input type="checkbox" id="ackRemote">
+      <span>Someone who is <b>not</b> at this keyboard is holding the physical remote and
+      watching the robot. The button above is only a software stop.</span>
+    </label>
+    <label class="check">
+      <input type="checkbox" id="ackElevated">
+      <span>Robot is <b>elevated, all four feet off the ground</b>.</span>
+    </label>
+    <label class="check" style="border-top:1px solid var(--line); padding-top:9px; color:var(--warn)">
+      <input type="checkbox" id="ackNoTelem">
+      <span>Override: let me drive with no telemetry (only if this unit genuinely never sends
+      status frames).</span>
+    </label>
+  </section>
+
+  <section>
+    <h2>7 · Drive</h2>
+    <div class="banner bad" id="banDriveLocked">Driving locked — tick the safety boxes and get a status frame.</div>
+
+    <div class="row">
+      <label for="speed" style="color:var(--dim);font-size:12px">speed</label>
+      <select id="speed">
+        <option value="30" selected>30 — verified "fairly quick"</option>
+        <option value="100">100 — faster</option>
+        <option value="127">127 — protocol max (128 = full reverse)</option>
+        <option value="128">128 — unclamped · robot reads −128 (FULL REVERSE, fastest byte)</option>
+        <option value="200">200 — unclamped · robot reads −56 (REVERSE)</option>
+      </select>
+    </div>
+    <div class="banner bad" id="banOverClamp" hidden>
+      Speed is above 127, so the clamp is off for the arrow keys. The byte goes out as
+      typed and the firmware reads it as <b id="overClampSigned">−56</b> — <b>▲ forward
+      will drive the robot backwards</b>, and ▼ back will drive it forwards. Nothing will
+      report an error. Robot elevated.
+    </div>
+
+    <div class="pad">
+      <span class="spacer"></span>
+      <button data-drive="up">▲</button>
+      <span class="spacer"></span>
+      <button data-drive="left">◀</button>
+      <button data-drive="down">▼</button>
+      <button data-drive="right">▶</button>
+    </div>
+    <p class="note" style="text-align:center;margin-top:0">
+      Hold arrow keys or these buttons. Release → zero frame.<br>
+      <b>Esc</b> zeroes all axes · <b>Space</b> is e-stop
+    </p>
+
+    <div class="kv" style="margin-top:10px">
+      <span>last TX frame</span><span id="lastFrame">—</span>
+      <span>frames sent</span><span id="txCount">0</span>
+    </div>
+
+    <h3>Posture (hold) — nothing below 17 does anything</h3>
+    <div class="row">
+      <button data-posture="raise" data-val="30">raise 30</button>
+      <button data-posture="raise" data-val="100">raise 100</button>
+      <button data-posture="bow" data-val="30">bow 30</button>
+      <button data-posture="twist" data-val="30">twist 30</button>
+    </div>
+
+    <h3>vy probe — unsolved item #2</h3>
+    <div class="row">
+      <button data-vy="30">vy = 30, all else zero</button>
+    </div>
+    <p class="note" style="margin-top:6px">
+      Nobody has confirmed whether byte 2 is lateral movement or turning. Hold this with
+      every other axis at zero and watch which one it is — that answers it in one run.
+    </p>
+
+    <h3 style="color:var(--warn)">Raw byte — clamp bypassed</h3>
+    <div class="row">
+      <select id="rawAxis">
+        <option value="0">vx</option><option value="1">vy</option>
+        <option value="2">wz</option><option value="3">raise</option>
+        <option value="4">bow</option><option value="5">twist</option>
+      </select>
+      <input type="text" id="rawValue" value="240" style="width:66px">
+      <button id="btnRaw" class="warnbtn">hold to send</button>
+    </div>
+    <div class="kv" style="margin-top:8px">
+      <span>on the wire</span><span id="rawHex">—</span>
+      <span>robot reads</span><span id="rawSigned">—</span>
+    </div>
+    <p class="note">
+      Sends the byte exactly as typed, no clamping — the only control here that does.
+      This is how you reproduce the pre-0.1.0a7 bug on purpose: anything above 127 is
+      negative, so <b>240 is −16 and the robot reverses</b>. Robot elevated for this.
+    </p>
+  </section>
+
+  <section>
+    <h2>8 · Skills — run these last</h2>
+    <div class="banner warn" id="banAnim" hidden>
+      A skill has been triggered this session. The firmware can stay in animation mode
+      and <b>silently ignore joystick frames</b> from now on. If driving stops responding,
+      that is trap #2, not your frame — reconnect or power-cycle before concluding anything.
+    </div>
+    <h3 style="margin-top:0">Confirmed on hardware (cheat sheet §4.2)</h3>
+    <div class="row">
+      <button data-skill="wag_tail">wag_tail</button>
+      <button data-skill="dance">dance</button>
+    </div>
+
+    <h3>Named in ff_sdk 0.1.0a7 — not confirmed here</h3>
+    <div class="row">
+      <button data-skill="stand_up">stand_up</button>
+      <button data-skill="sit_down">sit_down</button>
+      <button data-skill="lie_down">lie_down</button>
+    </div>
+    <p class="note">
+      The only three skill constants in <code>ble_protocol</code>
+      (<code>SKILL_STAND_UP</code> / <code>SKILL_SIT_DOWN</code> / <code>SKILL_LIE_DOWN</code>;
+      <code>stand</code> / <code>sit</code> / <code>lie</code> are aliases). The SDK still lists
+      the sit/stand toggle as unsettled — treat the result as something you verify, not something
+      you were told.
+    </p>
+
+    <div class="row" style="margin-top:10px">
+      <input type="text" id="skillName" placeholder="skill name">
+      <button id="btnSkill">send</button>
+    </div>
+    <p class="note">
+      By <b>name</b> only. A numeric id in <code>skill_name</code> silently does nothing —
+      no motion, no error. <code>send_skill</code> is the only JSON command that exists.
+    </p>
+    <p class="note">
+      <b>No jump on this link.</b> ff_sdk exposes <code>set_jump_angle</code> /
+      <code>set_jump_distance</code>, but they are parameter setters on the <b>rosbridge/WiFi</b>
+      transport only, and nothing anywhere triggers a jump. The 134-action menu that would
+      contain one does not exist over BLE.
+    </p>
+    <h3>Raw command channel</h3>
+    <div class="row">
+      <button data-cmd="cmd|start">cmd|start</button>
+      <button data-cmd="cmd|stop">cmd|stop</button>
+    </div>
+    <p class="note">
+      Those two plus <code>estop</code> / <code>recover</code> are the entire vocabulary —
+      ~60 other verbs were brute-forced and all return <code>e|1000</code>.
+    </p>
+  </section>
+</div>
+
+  <section style="grid-column: 1 / -1">
+    <h2>9 · Voice</h2>
+    <div class="banner bad" id="banVoiceSupport" hidden></div>
+
+    <div class="row">
+      <button id="btnMic" class="primary">🎤 listen</button>
+      <span class="chip" id="voiceState">idle</span>
+    </div>
+
+    <div class="kv" style="margin-top:12px">
+      <span>heard</span><span id="transcript">—</span>
+      <span>intent</span><span id="lastIntent">—</span>
+    </div>
+
+    <h3>Route</h3>
+    <select id="voiceMode">
+      <option value="both" selected>keyword first, AI fallback (recommended)</option>
+      <option value="keyword">keyword only — no network, always works</option>
+      <option value="ai">AI only — for testing intent parsing</option>
+    </select>
+
+    <h3>Motion duration per command</h3>
+    <input type="range" id="voiceDuration" min="250" max="2000" step="250" value="1000"
+           style="width:100%">
+    <div class="note" style="margin-top:2px">
+      <span id="voiceDurationOut">1000 ms</span> — hard-capped at 2000 ms in code. Every
+      voice command stops itself; none can start motion with no end.
+    </div>
+
+    <h3>OpenAI API</h3>
+    <div class="row">
+      <input type="text" id="apiKey" placeholder="sk-… (stays in this tab)" style="width:100%">
+    </div>
+    <div class="row" style="margin-top:6px">
+      <input type="text" id="apiModel" value="gpt-4o-mini" style="width:100%">
+    </div>
+    <p class="note">
+      The key lives in this input and nowhere else — not saved, not committed, gone on
+      reload. It is still visible to anything running in this page, so use a
+      throwaway key with a spend limit and never put this page on a public URL.
+    </p>
+    <p class="note">
+      The model only picks a label from a fixed list. It never returns a speed, a
+      duration, an axis or a byte — those are built here and clamped exactly like the
+      keyboard path. <b>Say "stop" and it is matched in code before the model is ever
+      called</b>, on partial speech, so stopping never waits for the network.
+    </p>
+  </section>
+
+</main>
+<script src="app.js"></script>
+<script src="voice.js"></script>
+<script src="host.js"></script>
+</body>
+</html>
