@@ -9,7 +9,17 @@ enum NaviAction: String, Codable, CaseIterable {
     case raise, bow, twist
     case stand, sit, lie
     case wagTail = "wag_tail"
-    case dance, stop, unknown
+    case dance
+    // The rest of the firmware skill set. Every one of these sends a `send_skill` name;
+    // whether it is safe where the robot is standing is the operator's call on this screen,
+    // and the bench verdict's call on the child-facing screens.
+    case spin, crawl, wave, stretch, shake
+    case shakeHands = "shake_hands"
+    case fingerHeart = "finger_heart"
+    case pushUps = "push_ups"
+    case beCute = "be_cute"
+    case impatient
+    case stop, unknown
 }
 
 /// How hard to move. A word, not a number — the model never picks a byte.
@@ -76,6 +86,16 @@ struct IntentClassifier {
     - lie         — lie down ("lay down")
     - wag_tail    — wag its tail
     - dance       — dance
+    - spin        — spin on the spot
+    - crawl       — crawl along the ground
+    - wave        — wave a paw ("say hello", "wave at me")
+    - stretch     — stretch out
+    - shake       — shake its whole body
+    - shake_hands — offer a paw to shake
+    - finger_heart— make a heart shape ("make a heart")
+    - push_ups    — do push-ups
+    - be_cute     — a cute little idle animation
+    - impatient   — fidget impatiently
     - stop        — stop moving
     - unknown     — ONLY when nothing above fits
 
@@ -83,7 +103,7 @@ struct IntentClassifier {
     - effort: "gentle", "normal" or "brisk". Use gentle for "a little"/"slowly",
       brisk for "fast"/"quickly". Default to normal.
     - seconds: how long to move, 0.25 to 2. Use 1 unless the person implies otherwise.
-      Posture and skill actions (stand, sit, lie, wag_tail, dance, stop) ignore it — send 1.
+      Skill actions (everything from stand down to impatient, plus stop) ignore it — send 1.
 
     Sequences are allowed: "sit down then wag your tail" is two commands in order.
     Never return more than 5.

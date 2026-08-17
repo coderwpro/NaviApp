@@ -1,8 +1,53 @@
 import SwiftUI
 
 /// What the face is doing. Shared by every screen that shows the eyes.
-enum FaceMood {
+///
+/// The first five are the original set and behave exactly as they always did — every
+/// existing call site keeps working. The rest were added because one face held for a whole
+/// story reads as a screensaver rather than a creature.
+enum FaceMood: CaseIterable {
     case idle, listening, speaking, happy, unsure
+    case neutral, blink, wink, winkLeft, flirty, cute, serious, sleepy, curious, surprised, sad, proud
+
+    var label: String {
+        switch self {
+        case .winkLeft: "wink (left)"
+        default: String(describing: self)
+        }
+    }
+
+    /// Resting faces: the ones the idle flourishes are allowed to interrupt.
+    var isResting: Bool {
+        switch self {
+        case .idle, .neutral, .listening, .sleepy, .curious: true
+        default: false
+        }
+    }
+}
+
+/// A one-off expression: "wink now", "look surprised now". The face plays it and returns to
+/// whatever it was resting on.
+///
+/// `token` is what makes it fire. Setting the same mood twice in a row is still two cues,
+/// which matters when the answer to two questions in a row is both times a delighted blink.
+struct FaceCue: Equatable {
+    var mood: FaceMood
+    var token: Int
+
+    init(_ mood: FaceMood, token: Int) {
+        self.mood = mood
+        self.token = token
+    }
+
+    /// How long the expression holds before the face falls back.
+    var seconds: Double {
+        switch mood {
+        case .blink: 0.30
+        case .wink, .winkLeft: 0.75
+        case .surprised: 0.90
+        default: 1.25
+        }
+    }
 }
 
 /// Pupil geometry. The single biggest cue that a pair of eyes is not human.
@@ -98,6 +143,11 @@ struct EyeStyle {
 struct EyesView: View {
     let mood: FaceMood
     var style: EyeStyle = .human
+    /// A one-off expression to play now, then fall back to `mood`.
+    var cue: FaceCue? = nil
+    /// The speaking rhythm, independent of the expression — so a delighted or sly face still
+    /// moves while it is talking, instead of the mood having to be `.speaking` to look alive.
+    var talking: Bool = false
 
     @State private var lidClosed = false
     @State private var gaze = CGSize.zero
@@ -112,39 +162,108 @@ struct EyesView: View {
     @State private var breathe: CGFloat = 1        // slow swell while listening
     @State private var celebrating = false
 
-    /// How open the lids are, 0 = shut.
-    private var openness: CGFloat {
+    // A cue temporarily overrides the resting mood.
+    @State private var transient: FaceMood?
+    @State private var cueGeneration = 0
+    // Idle flourishes, drawn with the same no-repeat rule as the body movements.
+    @State private var recentFlourishes: [Int] = []
+
+    /// The expression actually on screen: a cue if one is playing, otherwise the mood.
+    private var shown: FaceMood { transient ?? mood }
+
+    /// How open the lids are, 0 = shut. Per eye, because a wink is one eye and a flirty
+    /// look is one eye half-closed — neither is expressible with a single number.
+    private func openness(left: Bool) -> CGFloat {
         if lidClosed { return 0.04 }
-        switch mood {
-        case .happy: return 0.42        // squeezed up in a smile
-        case .speaking: return 0.82
-        case .listening: return 1.0
-        case .unsure: return 0.72
-        case .idle: return 0.9
+        switch shown {
+        case .wink:     return left ? 0.95 : 0.05
+        case .winkLeft: return left ? 0.05 : 0.95
+        case .flirty:   return left ? 0.74 : 0.30
+        default:        return restingOpenness
+        }
+    }
+
+    private var restingOpenness: CGFloat {
+        switch shown {
+        case .happy: 0.42           // squeezed up in a smile
+        case .speaking: 0.82
+        case .listening: 1.0
+        case .unsure: 0.72
+        case .idle: 0.9
+        case .neutral: 0.94
+        case .blink: 0.05
+        case .wink, .winkLeft, .flirty: 0.9      // handled per eye above
+        case .cute: 1.08            // wide and soft
+        case .serious: 0.56         // narrowed
+        case .sleepy: 0.32
+        case .curious: 0.98
+        case .surprised: 1.12
+        case .sad: 0.66
+        case .proud: 0.80
         }
     }
 
     /// Pupils widen when listening and contract when pleased — the same thing real eyes do,
-    /// and the only mood cue left once the iris is a fixed colour.
+    /// and the only mood cue left once the iris is a fixed colour. A big pupil is most of
+    /// what makes a face read as cute, and a small hard one is most of what makes it serious.
     private var pupilScale: CGFloat {
-        switch mood {
+        switch shown {
         case .listening: 0.46
         case .speaking: 0.40
         case .happy: 0.33
         case .unsure: 0.43
         case .idle: 0.42
+        case .neutral: 0.42
+        case .blink, .wink, .winkLeft: 0.42
+        case .flirty: 0.45
+        case .cute: 0.60
+        case .serious: 0.29
+        case .sleepy: 0.36
+        case .curious: 0.52
+        case .surprised: 0.56
+        case .sad: 0.50
+        case .proud: 0.35
         }
     }
 
     /// Mood still tints the glow, but each style has its own base so a fox never looks
     /// like a person with orange contact lenses.
     private var glow: Color {
-        switch mood {
+        switch shown {
         case .happy: .green
-        case .speaking: style.glow
-        case .listening: style.glow
         case .unsure: .orange
-        case .idle: style.glow
+        case .cute, .flirty: .pink
+        case .sad: .blue
+        case .sleepy: .indigo
+        case .surprised: .yellow
+        case .proud: .yellow
+        case .serious: .red
+        default: style.glow
+        }
+    }
+
+    /// How high the brow sits, as a fraction of eye height. The single strongest expression
+    /// cue at a distance — a lowered brow reads as serious from across a room when a pupil
+    /// size change does not.
+    private var browLift: CGFloat {
+        switch shown {
+        case .serious: 0.48
+        case .surprised, .cute: 0.80
+        case .curious: 0.72
+        case .sad: 0.58
+        case .sleepy: 0.54
+        default: 0.62
+        }
+    }
+
+    /// Brow angle. Positive drops the inner end (cross), negative lifts it (plaintive).
+    private var browAngle: Double {
+        switch shown {
+        case .serious: 9
+        case .sad: -8
+        case .flirty: -4
+        case .surprised: -3
+        default: 0
         }
     }
 
@@ -152,25 +271,44 @@ struct EyesView: View {
         GeometryReader { geo in
             let eyeWidth = min(geo.size.width * 0.40, geo.size.height * 1.15)
             HStack(spacing: eyeWidth * 0.34) {
-                eye(width: eyeWidth).scaleEffect(x: -1)   // left eye mirrors the right
-                eye(width: eyeWidth)
+                eye(width: eyeWidth, left: true).scaleEffect(x: -1)   // left eye mirrors the right
+                eye(width: eyeWidth, left: false)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .scaleEffect(pop * breathe)
             .rotationEffect(.degrees(tilt))
             .offset(y: talkBob)
         }
-        .onAppear { scheduleBlink(); scheduleGaze(); enter(mood) }
+        .onAppear { scheduleBlink(); scheduleGaze(); scheduleFlourish(); enter(shown) }
         .onDisappear { blinkTimer?.invalidate() }
-        .onChange(of: mood) { _, new in enter(new) }
+        .onChange(of: shown) { _, new in enter(new) }
+        .onChange(of: talking) { _, isTalking in
+            if isTalking { startTalking() } else { withAnimation(.easeOut(duration: 0.25)) { talkBob = 0 } }
+        }
+        .onChange(of: cue) { _, new in play(new) }
     }
 
-    private func eye(width: CGFloat) -> some View {
+    /// Plays a cue, then hands the face back to its resting mood. A second cue arriving
+    /// mid-play wins — the generation check stops the first one clearing it early.
+    private func play(_ cue: FaceCue?) {
+        guard let cue else { return }
+        cueGeneration += 1
+        let generation = cueGeneration
+        Task { @MainActor in
+            transient = cue.mood
+            try? await Task.sleep(nanoseconds: UInt64(cue.seconds * 1_000_000_000))
+            guard cueGeneration == generation else { return }
+            transient = nil
+        }
+    }
+
+    private func eye(width: CGFloat, left: Bool) -> some View {
         let height = width * 0.62
         let irisSize = width * 0.46
+        let lidOpenness = openness(left: left)
 
         return ZStack {
-            let lids = AlmondEye(openness: openness)
+            let lids = AlmondEye(openness: lidOpenness)
 
             // Sclera. Not pure white — a flat white eyeball reads as plastic.
             lids.fill(
@@ -192,26 +330,28 @@ struct EyesView: View {
             // Lash line and lashes.
             lids.stroke(Color(white: 0.08), lineWidth: height * 0.055)
             if style.lashes {
-                Lashes(openness: openness)
+                Lashes(openness: lidOpenness)
                     .stroke(Color(white: 0.06), style: StrokeStyle(lineWidth: height * 0.028, lineCap: .round))
                     .opacity(lidClosed ? 0.9 : 1)
             }
 
             // A soft fold just above the lash line — low, subtle, not a second arch.
-            Crease(openness: openness)
+            Crease(openness: lidOpenness)
                 .stroke(Color(white: 0.55).opacity(0.22), lineWidth: height * 0.018)
 
-            // Brow. The single strongest feature of a real eye at a distance.
+            // Brow. The single strongest feature of a real eye at a distance, and the one
+            // that carries serious / surprised / sad when a pupil size change cannot.
             if style.brow {
                 Brow()
                     .fill(Color(white: 0.10))
-                    .offset(y: -height * 0.62)
+                    .rotationEffect(.degrees(browAngle))
+                    .offset(y: -height * browLift)
             }
         }
         .frame(width: width, height: height)
         .shadow(color: glow.opacity(0.30), radius: width * 0.07)
         .animation(.easeInOut(duration: 0.09), value: lidClosed)
-        .animation(.easeInOut(duration: 0.3), value: mood)
+        .animation(.easeInOut(duration: 0.28), value: shown)
     }
 
     // MARK: - Entering a mood
@@ -225,8 +365,19 @@ struct EyesView: View {
         case .happy:     celebrate()
         case .unsure:    startThinking()
         case .listening: startListeningSwell()
-        case .idle:      break
+        case .idle, .neutral, .blink, .wink, .winkLeft: break
+        case .cute:      startCute()
+        case .flirty:    startFlirty()
+        case .serious:   startSerious()
+        case .sleepy:    startSleepy()
+        case .curious:   startCurious()
+        case .surprised: startSurprised()
+        case .sad:       startSad()
+        case .proud:     startProud()
         }
+        // The mouth and the eyes are the same thing here: if it is talking, it keeps the
+        // rhythm whatever face it is wearing.
+        if talking, mood != .speaking { startTalking() }
     }
 
     /// Cancel anything repeating. A `repeatForever` animation keeps running until something
@@ -236,6 +387,9 @@ struct EyesView: View {
             talkBob = 0
             tilt = 0
             breathe = 1
+            // Reset too: cute and surprised leave the face slightly enlarged, and without
+            // this every expression after one of them starts from the wrong size.
+            if !celebrating { pop = 1 }
         }
     }
 
@@ -260,6 +414,72 @@ struct EyesView: View {
             tilt = 4.5
             gaze = CGSize(width: 11, height: -7)
         }
+    }
+
+    /// Cute: everything opens and swells a little, slowly. The melting look is big pupils
+    /// plus a slow breath, not a new drawing.
+    private func startCute() {
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.6)) { pop = 1.05 }
+        withAnimation(.easeInOut(duration: 2.4).repeatForever(autoreverses: true)) { breathe = 1.03 }
+        withAnimation(.easeOut(duration: 0.4)) { gaze = .zero }
+    }
+
+    /// Flirty: the half-lidded eye is drawn per-eye; this is the tilt and the little glance
+    /// away that turn it from a droopy eyelid into a look.
+    private func startFlirty() {
+        withAnimation(.easeInOut(duration: 0.4)) {
+            tilt = -5
+            gaze = CGSize(width: 7, height: 2)
+        }
+        withAnimation(.easeOut(duration: 0.5)) { sparkle = 0.7 }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            withAnimation(.easeOut(duration: 0.6)) { sparkle = 0 }
+        }
+    }
+
+    /// Serious: everything stops. No drift, no swell — stillness is the expression.
+    private func startSerious() {
+        withAnimation(.easeInOut(duration: 0.22)) { gaze = .zero }
+    }
+
+    /// Sleepy: heavy lids, a long slow breath, and the gaze sinking.
+    private func startSleepy() {
+        withAnimation(.easeInOut(duration: 3.2).repeatForever(autoreverses: true)) { breathe = 0.985 }
+        withAnimation(.easeInOut(duration: 1.2)) { gaze = CGSize(width: 0, height: 5) }
+    }
+
+    /// Curious: a real head tilt and a look off to one side, the way a dog does it.
+    private func startCurious() {
+        let side: CGFloat = Bool.random() ? 1 : -1
+        withAnimation(.spring(response: 0.5, dampingFraction: 0.7)) {
+            tilt = Double(side) * 8
+            gaze = CGSize(width: 9 * side, height: -3)
+        }
+    }
+
+    /// Surprised: a fast pop that settles rather than springing back all the way.
+    private func startSurprised() {
+        withAnimation(.spring(response: 0.18, dampingFraction: 0.45)) { pop = 1.13 }
+        withAnimation(.easeOut(duration: 0.15)) { gaze = .zero }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 260_000_000)
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) { pop = 1.03 }
+        }
+    }
+
+    /// Sad: looking down, and a touch smaller. The brow does the rest.
+    private func startSad() {
+        withAnimation(.easeInOut(duration: 0.8)) {
+            gaze = CGSize(width: -3, height: 8)
+            breathe = 0.98
+        }
+    }
+
+    /// Proud: chin up — the gaze lifts, and a slow steady rise and fall.
+    private func startProud() {
+        withAnimation(.easeInOut(duration: 0.6)) { gaze = CGSize(width: 0, height: -6) }
+        withAnimation(.easeInOut(duration: 1.6).repeatForever(autoreverses: true)) { breathe = 1.02 }
     }
 
     /// Correct answer: a pop, a sparkle, and two quick delighted blinks.
@@ -291,11 +511,13 @@ struct EyesView: View {
         // Irregular: a metronome blink looks mechanical rather than alive.
         // Blink rate follows attention: quick while listening, sleepy when idle. A constant
         // rate is what makes a face look animatronic.
-        let window: ClosedRange<Double> = switch mood {
-        case .listening: 1.8...3.6
-        case .speaking:  2.6...4.6
-        case .unsure:    2.0...3.4
-        default:         3.2...6.5
+        let window: ClosedRange<Double> = switch shown {
+        case .listening, .curious: 1.8...3.6
+        case .speaking:            2.6...4.6
+        case .unsure, .surprised:  2.0...3.4
+        case .sleepy:              4.5...8.0
+        case .serious:             3.0...5.0
+        default:                   3.2...6.5
         }
         blinkTimer = Timer.scheduledTimer(withTimeInterval: .random(in: window), repeats: false) { _ in
             Task { @MainActor in
@@ -319,15 +541,65 @@ struct EyesView: View {
         Task { @MainActor in
             while !Task.isCancelled {
                 try? await Task.sleep(nanoseconds: UInt64(Double.random(in: 1.6...4.0) * 1_000_000_000))
-                // Held still while thinking or celebrating — those states own the gaze.
-                guard mood != .unsure, !celebrating else { continue }
+                // Held still while thinking, being serious, or celebrating — those states
+                // own the gaze, and a serious face that keeps glancing about is not serious.
+                guard shown != .unsure, shown != .serious, !celebrating else { continue }
                 // Listening looks straight at you; other moods wander further.
-                let range: ClosedRange<CGFloat> = mood == .listening ? -4...4 : -9...9
+                let range: ClosedRange<CGFloat> = shown == .listening ? -4...4 : -9...9
                 // Saccades are fast; the eye snaps rather than glides.
                 withAnimation(.easeOut(duration: 0.16)) {
                     gaze = CGSize(width: .random(in: range), height: .random(in: -4...4))
                 }
             }
+        }
+    }
+
+    /// Micro-life. Blinking and gaze drift alone still leave a resting face looking posed,
+    /// because they are the same two things over and over. These are small one-off beats —
+    /// a slow double blink, a glance away and back, a squint, a head tilt — drawn with the
+    /// same no-repeat rule the body movements use, so the idle face never loops.
+    private func scheduleFlourish() {
+        Task { @MainActor in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: UInt64(Double.random(in: 4.0...9.0) * 1_000_000_000))
+                // Never interrupt an expression that is doing something deliberate.
+                guard shown.isResting, transient == nil, !celebrating else { continue }
+
+                let count = 5
+                let allowed = (0..<count).filter { !recentFlourishes.contains($0) }
+                guard let pick = (allowed.isEmpty ? Array(0..<count) : allowed).randomElement() else { continue }
+                recentFlourishes.append(pick)
+                if recentFlourishes.count > 3 { recentFlourishes.removeFirst() }
+                await flourish(pick)
+            }
+        }
+    }
+
+    private func flourish(_ index: Int) async {
+        switch index {
+        case 0:     // a slow, heavy blink
+            withAnimation(.easeInOut(duration: 0.22)) { lidClosed = true }
+            try? await Task.sleep(nanoseconds: 220_000_000)
+            withAnimation(.easeInOut(duration: 0.2)) { lidClosed = false }
+        case 1:     // glance away, then back
+            withAnimation(.easeOut(duration: 0.18)) {
+                gaze = CGSize(width: .random(in: 8...14) * (Bool.random() ? 1 : -1), height: .random(in: -6...2))
+            }
+            try? await Task.sleep(nanoseconds: 900_000_000)
+            withAnimation(.easeOut(duration: 0.3)) { gaze = .zero }
+        case 2:     // a small squint, as if focusing
+            withAnimation(.easeInOut(duration: 0.3)) { breathe = 0.985 }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            withAnimation(.easeInOut(duration: 0.4)) { breathe = 1 }
+        case 3:     // a brief head tilt
+            let side: Double = Bool.random() ? 1 : -1
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.7)) { tilt = 4 * side }
+            try? await Task.sleep(nanoseconds: 1_100_000_000)
+            withAnimation(.easeInOut(duration: 0.5)) { tilt = 0 }
+        default:    // catchlights catch something
+            withAnimation(.easeInOut(duration: 0.5)) { sparkle = 0.45 }
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            withAnimation(.easeOut(duration: 0.7)) { sparkle = 0 }
         }
     }
 }

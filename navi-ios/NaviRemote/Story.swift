@@ -43,13 +43,27 @@ enum Emotion: String {
         }
     }
 
-    var face: FaceMood {
+    /// Faces this emotion can wear, best first.
+    ///
+    /// A list rather than one value on purpose: a ten-beat story is mostly `calm` and
+    /// `gentle`, so a one-to-one mapping means one face for the whole story — which is
+    /// exactly what made the eyes look frozen. The caller picks from here with a no-repeat
+    /// window, so consecutive calm beats still look different.
+    var faces: [FaceMood] {
         switch self {
-        case .cheerful, .excited, .proud: .happy
-        case .worried, .sad, .scared, .sly: .unsure
-        case .calm, .gentle: .speaking
+        case .calm:     [.neutral, .speaking, .idle]
+        case .gentle:   [.cute, .speaking, .neutral]
+        case .cheerful: [.happy, .cute, .flirty]
+        case .excited:  [.surprised, .happy, .curious]
+        case .worried:  [.unsure, .serious, .curious]
+        case .sad:      [.sad, .unsure]
+        case .sly:      [.flirty, .serious, .unsure]
+        case .scared:   [.surprised, .unsure, .serious]
+        case .proud:    [.proud, .happy]
         }
     }
+
+    var face: FaceMood { faces[0] }
 }
 
 /// Robot movements a story may call for. IN-PLACE ONLY — the phone is on the robot's back,

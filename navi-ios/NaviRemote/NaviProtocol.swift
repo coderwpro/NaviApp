@@ -54,10 +54,13 @@ enum NaviProtocol {
         case stop    = "cmd|stop"
     }
 
-    /// The only three skill constants ff_sdk defines, plus two confirmed on hardware but
-    /// absent from the SDK. `send_skill` is the only JSON command that exists, and it takes
-    /// a NAME — a numeric id silently does nothing.
-    static let skills = ["stand_up", "sit_down", "lie_down", "wag_tail", "dance"]
+    /// Every `send_skill` name the firmware accepts. `send_skill` is the only JSON command
+    /// that exists, and it takes a NAME — a numeric id silently does nothing, with no motion
+    /// and no error.
+    ///
+    /// The list is the allow-list `NaviBLE.sendSkill` enforces; where each name may be USED
+    /// is a separate question, answered by `SkillCatalog` and its bench verdicts.
+    static var skills: [String] { SkillCatalog.names }
 
     static func commandData(_ verb: Verb) -> Data {
         Data(verb.rawValue.utf8)

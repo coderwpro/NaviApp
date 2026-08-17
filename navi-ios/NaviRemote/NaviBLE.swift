@@ -70,6 +70,17 @@ final class NaviBLE: NSObject, ObservableObject {
         link.isReady && safetyAcknowledged && (statusFrameCount > 0 || allowDrivingWithoutTelemetry)
     }
 
+    /// Whether motion the *app* started on its own — ambient wiggles, a companion reaction —
+    /// may run. Stricter than `canDrive`: a latched e-stop closes it.
+    ///
+    /// Deliberately not folded into `canDrive`. The e-stop latches and only `cmd|recover`
+    /// clears it, so gating the manual controls on it would lock an operator out of the one
+    /// screen that can recover. A robot moving by itself after somebody hit e-stop is a
+    /// different matter.
+    var motionAllowed: Bool {
+        canDrive && !(status?.eStopLatched ?? false)
+    }
+
     // MARK: - CoreBluetooth
 
     private var central: CBCentralManager!
@@ -208,11 +219,16 @@ final class NaviBLE: NSObject, ObservableObject {
         note("TX \(verb.rawValue)")
     }
 
-    func sendSkill(_ name: String) {
-        guard NaviProtocol.skills.contains(name) else { note("refused unknown skill \(name)"); return }
-        guard let commandChar, let peripheral else { note("dropped skill — no link"); return }
+    /// Returns roughly how long the animation runs, so a caller scheduling movement can wait
+    /// it out instead of writing a posture frame over a skill the firmware is still playing.
+    /// Zero means nothing was sent.
+    @discardableResult
+    func sendSkill(_ name: String) -> TimeInterval {
+        guard NaviProtocol.skills.contains(name) else { note("refused unknown skill \(name)"); return 0 }
+        guard let commandChar, let peripheral else { note("dropped skill — no link"); return 0 }
         peripheral.writeValue(NaviProtocol.skillData(named: name), for: commandChar, type: .withResponse)
         note("TX skill \(name) — joystick may be ignored until the animation ends")
+        return SkillCatalog.seconds(name)
     }
 
     /// Emergency stop. Clears any motion first, then jumps the queue. Never gated on

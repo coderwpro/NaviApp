@@ -19,6 +19,10 @@ struct StoryView: View {
             }
         }
         .statusBarHidden(teller.phase != .idle)
+        // Leaving the tab ends the session. Without this the ambient movement keeps running
+        // on a screen nobody is looking at, and the robot carries on wiggling in the
+        // Control tab.
+        .onDisappear { teller.stop() }
     }
 
     // MARK: - Setup — a face and one button.
@@ -70,7 +74,7 @@ struct StoryView: View {
                 // Sideways on the robot's back: a face, and the one control that must stay.
                 ZStack(alignment: .topTrailing) {
                     Color.black.ignoresSafeArea()
-                    EyesView(mood: teller.face, style: teller.eyes).ignoresSafeArea()
+                    EyesView(mood: teller.face, style: teller.eyes, cue: teller.cue, talking: teller.isTalking).ignoresSafeArea()
                     stopChip
                 }
                 .contentShape(Rectangle())
@@ -90,7 +94,7 @@ struct StoryView: View {
                     }
                     .padding(.horizontal, 20).padding(.top, 10)
 
-                    EyesView(mood: teller.face, style: teller.eyes).frame(maxHeight: .infinity)
+                    EyesView(mood: teller.face, style: teller.eyes, cue: teller.cue, talking: teller.isTalking).frame(maxHeight: .infinity)
 
                     VStack(spacing: 10) {
                         if let prompt = teller.prompt {

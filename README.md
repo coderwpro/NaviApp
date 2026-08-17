@@ -28,7 +28,7 @@ the scene, and the robot moves on every sentence.
 ## Building it
 
 1. Open `navi-ios/NaviRemote.xcodeproj`
-2. Copy `NaviRemote/Secrets.example.swift` to `NaviRemote/Secrets.swift` and put your own
+2. Copy `NaviRemote/Secrets.swift.example` to `NaviRemote/Secrets.swift` and put your own
    OpenAI key in it — `Secrets.swift` is gitignored, so no key is ever committed
 3. Set your team under Signing & Capabilities, and change the bundle identifier
 4. **Run on a physical iPhone.** The Simulator has no Bluetooth radio, so
