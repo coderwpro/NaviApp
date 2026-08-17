@@ -23,6 +23,7 @@ struct ContentView: View {
     @ObservedObject var ble: NaviBLE
     @StateObject private var voice: VoiceController
     @State private var showLog = false
+    @State private var showBench = false
     @Environment(\.scenePhase) private var scenePhase
 
     init(ble: NaviBLE) {
@@ -44,6 +45,7 @@ struct ContentView: View {
             }
             .navigationTitle("Navi Remote")
             .background(Color(.systemGroupedBackground))
+            .sheet(isPresented: $showBench) { SkillBenchView(ble: ble) }
         }
         .onChange(of: scenePhase) { _, phase in
             // The real runaway risk isn't a long hold, it's the app losing the foreground
@@ -59,16 +61,32 @@ struct ContentView: View {
     // MARK: - E-stop, always first and never disabled
 
     private var eStopButton: some View {
-        Button(role: .destructive) {
-            UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-            ble.emergencyStop()
-        } label: {
-            Text("■  E-STOP")
-                .font(.system(size: 24, weight: .heavy, design: .rounded))
-                .frame(maxWidth: .infinity).padding(.vertical, 18)
+        VStack(spacing: 8) {
+            Button(role: .destructive) {
+                UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                ble.emergencyStop()
+            } label: {
+                Text("■  E-STOP")
+                    .font(.system(size: 24, weight: .heavy, design: .rounded))
+                    .frame(maxWidth: .infinity).padding(.vertical, 18)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.red)
+
+            // The e-stop LATCHES. Without this the app could stop the robot and never start
+            // it again — which between takes means power cycling the robot.
+            if ble.isLatched {
+                Button {
+                    ble.recoverFromEStop()
+                } label: {
+                    Label("E-stop latched — tap to recover", systemImage: "arrow.clockwise")
+                        .font(.callout.weight(.semibold))
+                        .frame(maxWidth: .infinity).padding(.vertical, 12)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
+            }
         }
-        .buttonStyle(.borderedProminent)
-        .tint(.red)
     }
 
     // MARK: - Cards
@@ -202,11 +220,29 @@ struct ContentView: View {
 
     private var skillsCard: some View {
         card("Skills — run these last") {
-            HStack {
-                ForEach(NaviProtocol.skills, id: \.self) { skill in
-                    Button(skill) { ble.sendSkill(skill) }
-                        .buttonStyle(.bordered).font(.caption)
+            // All sixteen firmware names, each showing what a bench test found. A skill
+            // still marked untested runs from here — that is what this card is for — but
+            // nothing else in the app will touch it until it has been classified.
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 104), spacing: 6)], spacing: 6) {
+                ForEach(SkillCatalog.all) { skill in
+                    Button { ble.sendSkill(skill.name) } label: {
+                        VStack(spacing: 1) {
+                            Text(skill.name).font(.caption2.monospaced())
+                            Text(SkillCatalog.verdict(skill.name).label)
+                                .font(.system(size: 9))
+                                .foregroundStyle(SkillCatalog.verdict(skill.name) == .tableSafe
+                                                 ? Color.green : Color.secondary)
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
                 }
+            }
+            Button {
+                showBench = true
+            } label: {
+                Label("Bench test and classify", systemImage: "checklist")
+                    .font(.caption.weight(.semibold))
             }
             Text("After an animation the firmware can silently ignore the joystick. Drive first, skills after.")
                 .font(.caption).foregroundStyle(.secondary)

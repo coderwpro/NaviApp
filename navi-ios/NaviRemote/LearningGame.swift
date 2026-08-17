@@ -44,6 +44,9 @@ final class LearningGame: NSObject, ObservableObject {
     @Published private(set) var current: WordPair?
     @Published private(set) var heard = ""
     @Published private(set) var mood: Mood = .idle
+    /// A one-off expression on top of `mood` — a wink for a right answer, a curious look
+    /// for a wrong one. Drawn from a no-repeat pool so the same reward face never lands twice.
+    @Published private(set) var cue: FaceCue?
     @Published private(set) var correct = 0
     @Published private(set) var asked = 0
     @Published private(set) var banner: String?
@@ -53,6 +56,16 @@ final class LearningGame: NSObject, ObservableObject {
     @Published private(set) var lesson: Lesson = .words
     @Published var deck: WordDeck = .spanish
     @Published var rewardsEnabled = true
+
+    private var cueToken = 0
+    private var delighted = NoRepeatPicker<FaceMood>([.happy, .wink, .winkLeft, .proud, .cute, .flirty], window: 3)
+    private var puzzled = NoRepeatPicker<FaceMood>([.curious, .unsure, .surprised, .serious], window: 2)
+
+    /// Plays a one-off expression, then the face falls back to whatever it was resting on.
+    private func flash(_ mood: FaceMood) {
+        cueToken += 1
+        cue = FaceCue(mood, token: cueToken)
+    }
 
     /// In-place only. A reward that walks the robot would tip the phone off its back.
     private static let rewards: [(label: String, run: (NaviBLE) -> Void)] = [
@@ -248,6 +261,7 @@ final class LearningGame: NSObject, ObservableObject {
             let question = attempt == 1
                 ? Self.languageQuestion : Self.languageRetry
             tutorLine = question
+            mood = .curious
             await speech.speak(question, emotion: .cheerful)
             guard phase == .choosingLanguage, !Task.isCancelled else { return }
 
@@ -284,6 +298,7 @@ final class LearningGame: NSObject, ObservableObject {
             let question = attempt == 1
                 ? Self.lessonQuestion : Self.lessonRetry
             tutorLine = question
+            mood = .curious
             await speech.speak(question, emotion: .cheerful)
             guard phase == .choosing, !Task.isCancelled else { return }
 
@@ -425,6 +440,7 @@ final class LearningGame: NSObject, ObservableObject {
             correct += 1
             streak += 1
             mood = .happy
+            flash(delighted.next() ?? .happy)
             let reward = fireReward()
             banner = "\(card.word) = \(card.answer)\(reward.map { " — " + $0 } ?? "")"
             teach(.correct(word: card.word, answer: card.answer), thenAdvance: true)
@@ -437,6 +453,7 @@ final class LearningGame: NSObject, ObservableObject {
             accepting = false
             tries += 1
             mood = .unsure
+            flash(puzzled.next() ?? .curious)
             let done = tries >= Self.maxTries
             teach(done ? .reveal(word: card.word, answer: card.answer)
                        : .hint(word: card.word, answer: card.answer),
@@ -448,6 +465,7 @@ final class LearningGame: NSObject, ObservableObject {
         streak = 0
         tries += 1
         mood = .unsure
+        flash(puzzled.next() ?? .curious)
         let done = tries >= Self.maxTries
         teach(done ? .reveal(word: card.word, answer: card.answer)
                    : .wrong(word: card.word, answer: card.answer, heard: said),

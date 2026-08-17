@@ -21,6 +21,11 @@ final class StoryTeller: NSObject, ObservableObject {
     @Published private(set) var prompt: String?
     @Published private(set) var heard = ""
     @Published private(set) var face: FaceMood = .idle
+    /// A one-off expression — a wink, a delighted blink — on top of `face`.
+    @Published private(set) var cue: FaceCue?
+    /// True only while a line is actually playing, so the eyes keep the speaking rhythm
+    /// whatever expression the beat is wearing.
+    @Published private(set) var isTalking = false
     /// Whose eyes the robot is wearing. Changes with the story being told.
     @Published private(set) var eyes: EyeStyle = .human
     @Published private(set) var beatIndex = 0
@@ -42,10 +47,18 @@ final class StoryTeller: NSObject, ObservableObject {
     private let speech: SpeechEngine
     private let companion = StoryCompanion()
     private let composer = StoryComposer()
+    /// Runs for the whole session on its own clock, so the robot is never still for long —
+    /// including while a line is playing, while a story is being written, and while it is
+    /// waiting for the child to answer.
+    private let ambient: AmbientMotion
+    /// Faces already used recently, so the same expression never lands twice running.
+    private var recentFaces: [FaceMood] = []
+    private var cueToken = 0
 
     init(ble: NaviBLE, speech: SpeechEngine) {
         self.ble = ble
         self.speech = speech
+        self.ambient = AmbientMotion(ble: ble)
         super.init()
     }
 
@@ -61,6 +74,10 @@ final class StoryTeller: NSObject, ObservableObject {
         phase = .opening
         UIApplication.shared.isIdleTimerDisabled = true
         configureAudioSession()
+        recentFaces.removeAll()
+        ambient.calm = false
+        ambient.quiet = false
+        ambient.start()
         speech.prefetch(Self.topicQuestion, emotion: .cheerful)
         speech.prefetch(Self.topicRetry, emotion: .cheerful)
         speech.prefetch(Self.knowThatOne, emotion: .cheerful)
@@ -110,10 +127,13 @@ final class StoryTeller: NSObject, ObservableObject {
             }
 
             guard !Task.isCancelled, phase != .idle else { return }
-            face = .speaking
+            ambient.calm = true
             line = Self.goodnight
             perform(.liedown)
-            await say(Self.goodnight, emotion: .gentle)
+            await say(Self.goodnight, emotion: .gentle, face: .sleepy)
+            // The session is over: the robot settles for real here, and only here.
+            ambient.stop()
+            ble.stopDriving(reason: "story finished")
             face = .idle
             phase = .finished
         }
@@ -254,14 +274,23 @@ final class StoryTeller: NSObject, ObservableObject {
         answerContinuation?.resume(returning: "")
         answerContinuation = nil
         stopListening()
+        // Ambient motion must never outlive the session. Killed before the stop frames go
+        // out, so nothing can schedule one more gesture behind them.
+        ambient.stop()
         ble.stopDriving(reason: "story ended")
         phase = .idle
         face = .idle
+        cue = nil
+        isTalking = false
         eyes = .human
         beatIndex = 0
         line = ""; prompt = nil; heard = ""
         UIApplication.shared.isIdleTimerDisabled = false
     }
+
+    /// What the ambient engine actually played, newest last. Exists so the no-repeat rule
+    /// can be checked against a real session instead of taken on trust.
+    var movementLog: [String] { ambient.recent }
 
     // MARK: - Modes
 
@@ -279,23 +308,34 @@ final class StoryTeller: NSObject, ObservableObject {
                     speech.prefetch(question, emotion: .gentle)
                 }
             }
-            // Scripted action if the story asked for one, otherwise something of its own —
-            // either way the robot moves on every beat.
-            if beat.action != nil {
-                perform(beat.action)
+            // The wind-down. The last two beats are the calm ones a child falls asleep to,
+            // so they keep moving — a robot that freezes reads as disconnected — but only
+            // from the small-amplitude tier and with long gaps between.
+            ambient.calm = index >= story.beats.count - 2
+
+            // Face and body land on the same instant. Picked once here and passed into
+            // say(), so the expression cannot drift a second behind the movement.
+            // Through the wind-down the eyes get heavy — the face settles for sleep along
+            // with the body rather than staying bright to the last word.
+            let beatFace = ambient.calm && Bool.random() ? .sleepy : faceFor(beat.emotion)
+            face = beatFace
+            if let action = beat.action {
+                perform(action)              // a scripted action wins; ambient yields to it
             } else {
-                moveForBeat(index, of: story.beats.count)
+                ambient.punctuate()          // otherwise the ambient stream marks the beat
             }
-            await say(beat.text, emotion: beat.emotion)
+            await say(beat.text, emotion: beat.emotion, face: beatFace)
 
             if let question = beat.ask {
                 if Task.isCancelled { return }
                 prompt = question
-                await say(question, emotion: .gentle)
+                await say(question, emotion: .gentle, face: .curious)
                 let answer = await listenForAnswer(seconds: 8)
                 prompt = nil
                 guard !Task.isCancelled else { return }
                 if !answer.isEmpty {
+                    flash([.happy, .wink, .cute].randomElement()!)
+                    ambient.punctuate()
                     let reply = await companion.reply(
                         .answeredQuestion(story: story.title, question: question, said: answer))
                     line = reply
@@ -312,60 +352,54 @@ final class StoryTeller: NSObject, ObservableObject {
 
     // MARK: - Robot
 
-    /// Little unscripted movements between beats: a shift of weight, a small twist, a
-    /// dip of the head. Amplitudes are deliberately half those of the scripted actions —
-    /// this should read as a creature listening to itself talk, not as choreography.
-    /// Movement for a beat that has no scripted action. Combinations, not single axes —
-    /// a twist with a little lift reads as a whole body shifting rather than one joint
-    /// moving. All in-place: the phone is riding on the robot's back.
-    private static let ambientMoves: [(NaviProtocol.Axes, TimeInterval)] = [
-        (.init(twist:  34),            0.8),   // look left
-        (.init(twist: -34),            0.8),   // look right
-        (.init(raise: 20, twist:  26), 0.8),   // lean and lift
-        (.init(raise: 20, twist: -26), 0.8),
-        (.init(bow:     26),           0.6),   // dip
-        (.init(bow:     18),           0.4),   // small nod
-        (.init(raise:   30),           0.7),   // stretch up
-        (.init(raise: 22, bow: 14),    0.6),   // sway
-        (.init(bow: 18, twist:  20),   0.6),   // head tilt
-        (.init(bow: 18, twist: -20),   0.6),
-    ]
-    private var lastAmbientIndex = -1
-
-    /// One movement per beat, so the robot is doing something through the whole story.
-    private func moveForBeat(_ index: Int, of total: Int) {
-        guard ble.canDrive else { return }
-        // The last two beats stay still — those are the calm ones to fall asleep to.
-        guard index < total - 2 else { return }
-        var pick = Int.random(in: 0..<Self.ambientMoves.count)
-        if pick == lastAmbientIndex { pick = (pick + 1) % Self.ambientMoves.count }
-        lastAmbientIndex = pick
-        let (axes, seconds) = Self.ambientMoves[pick]
-        lastMovementAt = Date()
-        ble.driveForVoice(axes, seconds: seconds)
-    }
-
-    /// In-place only — the phone is riding on the robot's back.
+    /// A movement the story explicitly asked for. In-place only — the phone is riding on
+    /// the robot's back — and the ambient stream is told to yield for its duration so a
+    /// posture frame is never laid on top of a running animation.
     private func perform(_ action: StoryAction?) {
-        guard let action, ble.canDrive else { return }
+        guard let action, ble.motionAllowed else { return }
         lastMovementAt = Date()
         switch action {
-        case .nod:     ble.driveForVoice(.init(bow: 25), seconds: 0.5)
-        case .bow:     ble.driveForVoice(.init(bow: 45), seconds: 1.0)
-        case .wiggle:  ble.driveForVoice(.init(twist: 40), seconds: 1.0)
-        case .rearUp:  ble.driveForVoice(.init(raise: 50), seconds: 1.0)
-        case .wagTail: ble.sendSkill("wag_tail")
-        case .dance:   ble.sendSkill("dance")
-        case .sit:     ble.sendSkill("sit_down")
-        case .liedown: ble.sendSkill("lie_down")
+        case .nod:     ambient.yield(for: 0.7);  ble.driveForVoice(.init(bow: 25), seconds: 0.5)
+        case .bow:     ambient.yield(for: 1.2);  ble.driveForVoice(.init(bow: 45), seconds: 1.0)
+        case .wiggle:  ambient.yield(for: 1.2);  ble.driveForVoice(.init(twist: 40), seconds: 1.0)
+        case .rearUp:  ambient.yield(for: 1.2);  ble.driveForVoice(.init(raise: 50), seconds: 1.0)
+        case .wagTail: ambient.yield(for: ble.sendSkill("wag_tail"))
+        case .dance:   ambient.yield(for: ble.sendSkill("dance"))
+        case .sit:     ambient.yield(for: ble.sendSkill("sit_down"))
+        case .liedown: ambient.yield(for: ble.sendSkill("lie_down"))
         }
+    }
+
+    // MARK: - The face
+
+    /// A face for this beat's emotion, never the same one twice running.
+    ///
+    /// The emotion is already declared by every beat and was already driving the voice.
+    /// This is the second output from that same source of truth — before it, ten beats of
+    /// a mostly-calm story produced ten identical faces.
+    private func faceFor(_ emotion: Emotion) -> FaceMood {
+        let options = emotion.faces
+        let fresh = options.filter { !recentFaces.contains($0) }
+        let choice = (fresh.isEmpty ? options : fresh).randomElement() ?? .speaking
+        recentFaces.append(choice)
+        if recentFaces.count > 3 { recentFaces.removeFirst(recentFaces.count - 3) }
+        return choice
+    }
+
+    /// A one-off expression on top of whatever face is resting — a wink when the child
+    /// answers, a delighted blink when something lands.
+    private func flash(_ mood: FaceMood) {
+        cueToken += 1
+        cue = FaceCue(mood, token: cueToken)
     }
 
     // MARK: - Speech out
 
-    private func say(_ text: String, emotion: Emotion) async {
-        face = emotion.face
+    private func say(_ text: String, emotion: Emotion, face chosen: FaceMood? = nil) async {
+        face = chosen ?? faceFor(emotion)
+        isTalking = true
         await speech.speak(text, emotion: emotion)
+        isTalking = false
     }
 
     // MARK: - Speech in
@@ -373,7 +407,12 @@ final class StoryTeller: NSObject, ObservableObject {
     /// Waits for the child to answer, or gives up after `seconds` of nothing.
     private func listenForAnswer(seconds: Double) async -> String {
         heard = ""
+        // Listening has to LOOK like listening, and not like the face it just had while
+        // speaking. Wide, attentive, straight at the child.
         face = .listening
+        // Still moving — a robot that goes rigid the moment it asks a question reads as
+        // crashed — but softly, because servo noise costs recognition accuracy.
+        ambient.quiet = true
         phase = .waiting
         startListening()
         let answer = await withCheckedContinuation { (continuation: CheckedContinuation<String, Never>) in
@@ -388,6 +427,7 @@ final class StoryTeller: NSObject, ObservableObject {
             }
         }
         stopListening()
+        ambient.quiet = false
         phase = .telling
         return answer.trimmingCharacters(in: .whitespacesAndNewlines)
     }

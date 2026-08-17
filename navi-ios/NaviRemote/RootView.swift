@@ -27,6 +27,10 @@ struct RootView: View {
             StoryView(ble: ble, speech: speech)
                 .tabItem { Label("Stories", systemImage: "book.fill") }
                 .tag(2)
+
+            CompanionView(ble: ble, speech: speech)
+                .tabItem { Label("Companion", systemImage: "pawprint.fill") }
+                .tag(3)
         }
         .onChange(of: tab) { _, _ in
             // Leaving a screen mid-command must not leave the robot moving, and the two

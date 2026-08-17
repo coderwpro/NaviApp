@@ -144,6 +144,14 @@ final class VoiceController: ObservableObject {
         ("stand", .stand), ("sit", .sit), ("lie", .lie), ("lay", .lie),
         ("wag", .wagTail), ("tail", .wagTail), ("dance", .dance),
         ("bow", .bow), ("twist", .twist), ("wiggle", .twist), ("raise", .raise), ("lift", .raise),
+        // The rest of the firmware skills. Longer phrases first, so "shake hands" is never
+        // swallowed by "shake".
+        ("shake hands", .shakeHands), ("shake your paw", .shakeHands), ("paw", .shakeHands),
+        ("finger heart", .fingerHeart), ("heart", .fingerHeart),
+        ("push up", .pushUps), ("press up", .pushUps),
+        ("be cute", .beCute), ("cute", .beCute),
+        ("impatient", .impatient), ("stretch", .stretch), ("shake", .shake),
+        ("spin", .spin), ("crawl", .crawl), ("wave", .wave), ("hello", .wave),
     ]
 
     private func route(_ text: String) {
@@ -222,13 +230,28 @@ final class VoiceController: ObservableObject {
         case .turnLeft:  ble.driveForVoice(.init(wz: turn), seconds: seconds)
         case .turnRight: ble.driveForVoice(.init(wz: -turn), seconds: seconds)
         case .raise:     ble.driveForVoice(.init(raise: 30), seconds: seconds)
-        case .bow:       ble.driveForVoice(.init(bow: 30), seconds: seconds)
         case .twist:     ble.driveForVoice(.init(twist: 30), seconds: seconds)
-        case .stand:     ble.sendSkill("stand_up");  return 1.0
-        case .sit:       ble.sendSkill("sit_down");  return 1.0
-        case .lie:       ble.sendSkill("lie_down");  return 1.0
-        case .wagTail:   ble.sendSkill("wag_tail");  return 1.0
-        case .dance:     ble.sendSkill("dance");     return 1.0
+        // `bow` exists both as a posture dip and as a firmware skill. Use the skill once a
+        // bench test has cleared it, and the posture dip until then — so "bow" always does
+        // something, and never something untested.
+        case .bow:
+            if SkillCatalog.verdict("bow") == .tableSafe { return ble.sendSkill("bow") }
+            ble.driveForVoice(.init(bow: 30), seconds: seconds)
+        case .stand:       return ble.sendSkill("stand_up")
+        case .sit:         return ble.sendSkill("sit_down")
+        case .lie:         return ble.sendSkill("lie_down")
+        case .wagTail:     return ble.sendSkill("wag_tail")
+        case .dance:       return ble.sendSkill("dance")
+        case .spin:        return ble.sendSkill("spin")
+        case .crawl:       return ble.sendSkill("crawl")
+        case .wave:        return ble.sendSkill("wave")
+        case .stretch:     return ble.sendSkill("stretch")
+        case .shake:       return ble.sendSkill("shake")
+        case .shakeHands:  return ble.sendSkill("shake_hands")
+        case .fingerHeart: return ble.sendSkill("finger_heart")
+        case .pushUps:     return ble.sendSkill("push_ups")
+        case .beCute:      return ble.sendSkill("be_cute")
+        case .impatient:   return ble.sendSkill("impatient")
         case .stop:      stopSequence(); ble.stopDriving(reason: "voice"); return 0
         case .unknown:   return 0
         }
