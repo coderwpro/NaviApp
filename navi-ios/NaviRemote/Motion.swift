@@ -117,6 +117,17 @@ enum SkillCatalog {
         UserDefaults.standard.dictionary(forKey: defaultsKey) as? [String: String] ?? [:]
     }
 
+    /// Where the robot is standing. A property of the physical situation, not of a screen,
+    /// so the block palette and the companion's command list agree about it rather than
+    /// each keeping their own idea.
+    ///
+    /// Off — on a table with the phone on its back — means no walking, no turning, and no
+    /// skill that has not been bench tested.
+    static var onFloor: Bool {
+        get { UserDefaults.standard.bool(forKey: "navi.onFloor") }
+        set { UserDefaults.standard.set(newValue, forKey: "navi.onFloor") }
+    }
+
     /// Skills the ambient engine may use: candidates that have actually tested table-safe.
     /// Before anyone benches anything this is just `wag_tail`, which is the honest answer.
     static var ambientPool: [RobotSkill] {

@@ -16,6 +16,14 @@ struct SkillBenchView: View {
     @State private var lastRun: String?
     /// Recorded verdicts live in UserDefaults; this only exists to force a redraw.
     @State private var revision = 0
+    @State private var probe = ""
+    @State private var probed: [String] = []
+
+    /// The "listening / thinking / reacting" gestures a storytelling companion wants, if
+    /// the firmware turns out to accept them. Guesses — that is the whole point of a probe.
+    private static let suggestions = ["nod_head", "shake_head", "look_around", "listen_left",
+                                      "listen_right", "think", "sniff", "howl", "sneeze",
+                                      "turn_around", "jump", "greet"]
 
     var body: some View {
         NavigationStack {
@@ -34,6 +42,37 @@ struct SkillBenchView: View {
                 Section("The sixteen skills") {
                     ForEach(SkillCatalog.all) { skill in
                         row(skill)
+                    }
+                }
+
+                Section("Probe for names outside the sixteen") {
+                    Text("A larger action vocabulary exists on the robot side. Whether `send_skill` accepts these names over BLE is unverified — this sends one and logs it.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    HStack {
+                        TextField("skill_name", text: $probe)
+                            .textFieldStyle(.roundedBorder)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                        Button("Send") {
+                            ble.probeSkill(probe)
+                            if !probed.contains(probe) { probed.append(probe) }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(probe.isEmpty || !ble.motionAllowed)
+                    }
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(Self.suggestions, id: \.self) { name in
+                                Button(name) { probe = name }
+                                    .buttonStyle(.bordered).font(.caption2)
+                            }
+                        }
+                    }
+                    Text("An unknown name is accepted silently — no motion, no error, `action_id` unchanged. Watch the robot and the action_id in Control: no change to either means the name is not real.")
+                        .font(.caption2).foregroundStyle(.orange)
+                    if !probed.isEmpty {
+                        Text("tried: \(probed.joined(separator: ", "))")
+                            .font(.caption2.monospaced()).foregroundStyle(.secondary)
                     }
                 }
 

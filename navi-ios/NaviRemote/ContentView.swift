@@ -61,16 +61,32 @@ struct ContentView: View {
     // MARK: - E-stop, always first and never disabled
 
     private var eStopButton: some View {
-        Button(role: .destructive) {
-            UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
-            ble.emergencyStop()
-        } label: {
-            Text("■  E-STOP")
-                .font(.system(size: 24, weight: .heavy, design: .rounded))
-                .frame(maxWidth: .infinity).padding(.vertical, 18)
+        VStack(spacing: 8) {
+            Button(role: .destructive) {
+                UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                ble.emergencyStop()
+            } label: {
+                Text("■  E-STOP")
+                    .font(.system(size: 24, weight: .heavy, design: .rounded))
+                    .frame(maxWidth: .infinity).padding(.vertical, 18)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.red)
+
+            // The e-stop LATCHES. Without this the app could stop the robot and never start
+            // it again — which between takes means power cycling the robot.
+            if ble.isLatched {
+                Button {
+                    ble.recoverFromEStop()
+                } label: {
+                    Label("E-stop latched — tap to recover", systemImage: "arrow.clockwise")
+                        .font(.callout.weight(.semibold))
+                        .frame(maxWidth: .infinity).padding(.vertical, 12)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
+            }
         }
-        .buttonStyle(.borderedProminent)
-        .tint(.red)
     }
 
     // MARK: - Cards

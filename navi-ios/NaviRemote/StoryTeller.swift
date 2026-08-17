@@ -315,7 +315,9 @@ final class StoryTeller: NSObject, ObservableObject {
 
             // Face and body land on the same instant. Picked once here and passed into
             // say(), so the expression cannot drift a second behind the movement.
-            let beatFace = faceFor(beat.emotion)
+            // Through the wind-down the eyes get heavy — the face settles for sleep along
+            // with the body rather than staying bright to the last word.
+            let beatFace = ambient.calm && Bool.random() ? .sleepy : faceFor(beat.emotion)
             face = beatFace
             if let action = beat.action {
                 perform(action)              // a scripted action wins; ambient yields to it

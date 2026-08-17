@@ -25,6 +25,9 @@ final class Companion: NSObject, ObservableObject {
     /// What it did with the last thing it heard. On screen because "it ignored me" and
     /// "it did not hear me" look identical otherwise.
     @Published private(set) var lastRoute = ""
+    /// Whether it says something after a command. Off for filming: the sound of the opening
+    /// command should be the child's voice and the servos, not the app talking over them.
+    @Published var chatty = true
 
     private unowned let ble: NaviBLE
     private let speech: SpeechEngine
@@ -68,7 +71,7 @@ final class Companion: NSObject, ObservableObject {
                 phase = .idle
                 return
             }
-            listener.contextualStrings = Script.rehearsedCommands + Script.gameWords
+            listener.contextualStrings = Script.rehearsedCommands + Script.movementPhrases + Script.gameWords
             ambient.start()
             // Prefetch the fixed lines so the opening never waits on the network. The first
             // five seconds of the film are this exact path.
@@ -158,12 +161,37 @@ final class Companion: NSObject, ObservableObject {
             lastRoute = "command → \(action.label)"
             let seconds = perform(action)
             flash(faces.next() ?? .happy)
-            await say(acknowledgements.next() ?? "Okay!", emotion: .cheerful,
-                      face: .happy, after: seconds)
+            // Quiet where it matters: the sound of the first command is the child's voice
+            // and the servos, not the app talking over them. It answers with a face and a
+            // movement, and only speaks once the movement is done.
+            if chatty {
+                await say(acknowledgements.next() ?? "Okay!", emotion: .cheerful,
+                          face: .happy, after: seconds)
+            } else {
+                face = .happy
+            }
             return
         }
 
-        // 2. A game.
+        // 2. Walking and turning. Only offered when the robot is on the floor — with the
+        //    phone riding on its back on a table these are how you lose a phone.
+        if let move = Script.movement(in: lower) {
+            guard SkillCatalog.onFloor else {
+                lastRoute = "walk command ignored — robot is set to table mode"
+                await say("I can't walk right now. Ask me to do something else!",
+                          emotion: .gentle, face: .unsure)
+                return
+            }
+            lastRoute = "command → \(move.label)"
+            ambient.yield(for: 1.4)
+            ble.driveForVoice(move.axes(speed: ble.driveSpeed, turn: ble.turnRate), seconds: 1.2)
+            flash(faces.next() ?? .happy)
+            if chatty { await say(acknowledgements.next() ?? "Okay!", emotion: .cheerful,
+                                  face: .happy, after: 1.2) }
+            return
+        }
+
+        // 3. A game.
         if let starting = Game.matching(lower) {
             lastRoute = "game → \(starting.name)"
             game = starting
@@ -172,7 +200,7 @@ final class Companion: NSObject, ObservableObject {
             return
         }
 
-        // 3. Anything else is conversation.
+        // 4. Anything else is conversation.
         lastRoute = "conversation"
         phase = .thinking
         face = .unsure
@@ -359,6 +387,47 @@ enum Script {
     /// Fed to the recogniser as hints — the single biggest accuracy win for a child speaker
     /// at filming distance.
     static var rehearsedCommands: [String] { commands.map(\.phrase) }
+
+    /// Walking and turning. Kept apart from the skill commands because these are the only
+    /// things in the whole tab that move the robot off the spot, and they are refused
+    /// outright unless the robot is on the floor.
+    enum Movement {
+        case forward, backward, left, right
+
+        var label: String {
+            switch self {
+            case .forward: "forward"
+            case .backward: "backward"
+            case .left: "turn left"
+            case .right: "turn right"
+            }
+        }
+
+        /// Built here and clamped again by NaviBLE — nothing chooses a raw byte.
+        func axes(speed: Int, turn: Int) -> NaviProtocol.Axes {
+            switch self {
+            case .forward:  .init(vx: speed)
+            case .backward: .init(vx: -speed)
+            case .left:     .init(wz: turn)
+            case .right:    .init(wz: -turn)
+            }
+        }
+    }
+
+    static let movements: [(phrase: String, move: Movement)] = [
+        ("come here", .forward), ("walk forward", .forward), ("go forward", .forward),
+        ("come to me", .forward), ("walk", .forward),
+        ("back up", .backward), ("go back", .backward), ("backward", .backward),
+        ("turn left", .left), ("go left", .left),
+        ("turn right", .right), ("go right", .right),
+        ("turn around", .left),
+    ]
+
+    static func movement(in text: String) -> Movement? {
+        movements.first { text.contains($0.phrase) }?.move
+    }
+
+    static var movementPhrases: [String] { movements.map(\.phrase) }
 
     static let gameWords = ["play a game", "copy me", "guess my feeling",
                             "happy", "sad", "sleepy", "surprised", "serious", "curious"]

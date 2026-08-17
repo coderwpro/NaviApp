@@ -16,6 +16,9 @@ import AVFoundation
 final class SpeechEngine: NSObject, ObservableObject {
 
     @Published var useNaturalVoice = true
+    /// True while a line is actually playing. The eyes use it for the speaking rhythm, so
+    /// a delighted or sly face still moves while it talks instead of having to BE `.speaking`.
+    @Published private(set) var isSpeaking = false
     @Published private(set) var lastFallbackReason: String?
 
     private let synth = AVSpeechSynthesizer()
@@ -36,6 +39,8 @@ final class SpeechEngine: NSObject, ObservableObject {
 
     func speak(_ text: String, emotion: Emotion, language: String = "en-US") async {
         guard !text.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        isSpeaking = true
+        defer { isSpeaking = false }
 
         if useNaturalVoice, let data = await audio(for: text, emotion: emotion, language: language) {
             await play(data)
@@ -56,6 +61,7 @@ final class SpeechEngine: NSObject, ObservableObject {
     }
 
     func stop() {
+        isSpeaking = false
         player?.stop()
         player = nil
         playbackContinuation?.resume(); playbackContinuation = nil

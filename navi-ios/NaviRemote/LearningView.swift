@@ -2,11 +2,18 @@ import SwiftUI
 
 struct LearningView: View {
     @ObservedObject var ble: NaviBLE
+    /// Held so the eyes can follow the voice — `isSpeaking` drives the speaking rhythm.
+    @ObservedObject var speech: SpeechEngine
     @StateObject private var game: LearningGame
 
     init(ble: NaviBLE, speech: SpeechEngine) {
         self.ble = ble
+        self.speech = speech
         _game = StateObject(wrappedValue: LearningGame(ble: ble, speech: speech))
+    }
+
+    private var eyes: some View {
+        EyesView(mood: game.mood, cue: game.cue, talking: speech.isSpeaking)
     }
 
     var body: some View {
@@ -83,14 +90,23 @@ struct LearningView: View {
     private var faceOnly: some View {
         ZStack(alignment: .topTrailing) {
             Color.black.ignoresSafeArea()
-            EyesView(mood: game.mood).ignoresSafeArea()
+            eyes.ignoresSafeArea()
 
             // The one control that stays, because it has to. Small, but always tappable.
-            Button { ble.emergencyStop() } label: {
-                Text("STOP").font(.caption2.weight(.heavy))
-                    .padding(.horizontal, 10).padding(.vertical, 6)
-                    .background(.red.opacity(0.85), in: Capsule())
-                    .foregroundStyle(.white)
+            HStack(spacing: 6) {
+                if ble.isLatched {
+                    Button { ble.recoverFromEStop() } label: {
+                        Text("RECOVER").font(.caption2.weight(.heavy))
+                            .padding(.horizontal, 10).padding(.vertical, 6)
+                            .background(.orange, in: Capsule()).foregroundStyle(.white)
+                    }
+                }
+                Button { ble.emergencyStop() } label: {
+                    Text("STOP").font(.caption2.weight(.heavy))
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                        .background(.red.opacity(0.85), in: Capsule())
+                        .foregroundStyle(.white)
+                }
             }
             .padding(14)
         }
@@ -115,15 +131,24 @@ struct LearningView: View {
                     }
                 }
                 Spacer()
-                Button { ble.emergencyStop() } label: {
-                    Text("E-STOP").font(.caption.weight(.heavy))
-                        .padding(.horizontal, 12).padding(.vertical, 7)
-                        .background(.red, in: Capsule()).foregroundStyle(.white)
+                HStack(spacing: 6) {
+                    if ble.isLatched {
+                        Button { ble.recoverFromEStop() } label: {
+                            Text("RECOVER").font(.caption.weight(.heavy))
+                                .padding(.horizontal, 10).padding(.vertical, 7)
+                                .background(.orange, in: Capsule()).foregroundStyle(.white)
+                        }
+                    }
+                    Button { ble.emergencyStop() } label: {
+                        Text("E-STOP").font(.caption.weight(.heavy))
+                            .padding(.horizontal, 12).padding(.vertical, 7)
+                            .background(.red, in: Capsule()).foregroundStyle(.white)
+                    }
                 }
             }
             .padding(.horizontal, 20).padding(.top, 12)
 
-            EyesView(mood: game.mood).frame(maxHeight: .infinity)
+            eyes.frame(maxHeight: .infinity)
 
             VStack(spacing: 10) {
                 if let banner = game.banner {

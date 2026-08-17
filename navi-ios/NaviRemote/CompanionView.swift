@@ -9,6 +9,7 @@ struct CompanionView: View {
     @ObservedObject var ble: NaviBLE
     @StateObject private var companion: Companion
     @State private var showBlocks = false
+    @State private var onFloor = SkillCatalog.onFloor
 
     init(ble: NaviBLE, speech: SpeechEngine) {
         self.ble = ble
@@ -61,6 +62,24 @@ struct CompanionView: View {
             }
             .padding(.top, 16)
             .tint(.orange)
+
+            VStack(spacing: 6) {
+                Toggle(isOn: $onFloor) {
+                    Text("Robot is on the floor — walking allowed").font(.caption)
+                }
+                .onChange(of: onFloor) { _, value in SkillCatalog.onFloor = value }
+                Toggle(isOn: $companion.chatty) {
+                    Text("Answer commands out loud").font(.caption)
+                }
+                Text(companion.chatty
+                     ? "Turn this off for filming: the sound of a command should be the child's voice and the servos, not the app."
+                     : "Quiet — commands get a face and a movement, no speech. Conversation still talks.")
+                    .font(.caption2).foregroundStyle(.white.opacity(0.35))
+                    .multilineTextAlignment(.leading)
+            }
+            .tint(.orange)
+            .foregroundStyle(.white.opacity(0.7))
+            .padding(.horizontal, 40).padding(.top, 18)
 
             Group {
                 if let problem = companion.problem {
@@ -137,10 +156,21 @@ struct CompanionView: View {
     }
 
     private var stopChip: some View {
-        Button { ble.emergencyStop() } label: {
-            Text("E-STOP").font(.caption2.weight(.heavy))
-                .padding(.horizontal, 11).padding(.vertical, 6)
-                .background(.red, in: Capsule()).foregroundStyle(.white)
+        HStack(spacing: 6) {
+            // Recoverable in one tap: the e-stop latches, so without this a stop between
+            // takes means power cycling the robot.
+            if ble.isLatched {
+                Button { ble.recoverFromEStop() } label: {
+                    Text("RECOVER").font(.caption2.weight(.heavy))
+                        .padding(.horizontal, 11).padding(.vertical, 6)
+                        .background(.orange, in: Capsule()).foregroundStyle(.white)
+                }
+            }
+            Button { ble.emergencyStop() } label: {
+                Text("E-STOP").font(.caption2.weight(.heavy))
+                    .padding(.horizontal, 11).padding(.vertical, 6)
+                    .background(.red, in: Capsule()).foregroundStyle(.white)
+            }
         }
         .padding(10)
     }
@@ -161,7 +191,8 @@ struct BlockEditorView: View {
     @ObservedObject var ble: NaviBLE
     @Environment(\.dismiss) private var dismiss
 
-    @State private var onFloor = false
+    /// Mirrors the app-wide setting so the toggle animates; the stored value is the truth.
+    @State private var onFloor = SkillCatalog.onFloor
 
     private var palette: [BlockAction] {
         BlockAction.allCases.filter { $0.isAvailable(onFloor: onFloor) }
@@ -192,6 +223,7 @@ struct BlockEditorView: View {
             Toggle(isOn: $onFloor) {
                 Text("Robot is on the floor").font(.callout)
             }
+            .onChange(of: onFloor) { _, value in SkillCatalog.onFloor = value }
             Text(onFloor
                  ? "Every skill is available, including untested ones. Keep the space clear."
                  : "On a table with the phone on its back — only skills a bench test cleared as staying in place are offered.")

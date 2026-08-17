@@ -120,10 +120,21 @@ struct StoryView: View {
     }
 
     private var stopChip: some View {
-        Button { ble.emergencyStop() } label: {
-            Text("E-STOP").font(.caption2.weight(.heavy))
-                .padding(.horizontal, 11).padding(.vertical, 6)
-                .background(.red, in: Capsule()).foregroundStyle(.white)
+        HStack(spacing: 6) {
+            // Recoverable in one tap: the e-stop latches, so without this a stop between
+            // takes means power cycling the robot.
+            if ble.isLatched {
+                Button { ble.recoverFromEStop() } label: {
+                    Text("RECOVER").font(.caption2.weight(.heavy))
+                        .padding(.horizontal, 11).padding(.vertical, 6)
+                        .background(.orange, in: Capsule()).foregroundStyle(.white)
+                }
+            }
+            Button { ble.emergencyStop() } label: {
+                Text("E-STOP").font(.caption2.weight(.heavy))
+                    .padding(.horizontal, 11).padding(.vertical, 6)
+                    .background(.red, in: Capsule()).foregroundStyle(.white)
+            }
         }
         .padding(10)
     }

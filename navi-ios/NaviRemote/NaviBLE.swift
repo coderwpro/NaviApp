@@ -231,12 +231,40 @@ final class NaviBLE: NSObject, ObservableObject {
         return SkillCatalog.seconds(name)
     }
 
+    /// Sends a skill name that is NOT in the allow-list, on purpose.
+    ///
+    /// The firmware's action vocabulary is larger than the sixteen names we know, and the
+    /// only way to find out whether `send_skill` accepts `nod_head` or `look_around` is to
+    /// send it and watch. Deliberately a separate entry point from `sendSkill`, so probing
+    /// is always an explicit act and never something a caller does by accident.
+    func probeSkill(_ name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, let commandChar, let peripheral else { note("probe dropped — no link"); return }
+        peripheral.writeValue(NaviProtocol.skillData(named: trimmed), for: commandChar, type: .withResponse)
+        note("PROBE skill \"\(trimmed)\" — watch the robot AND action_id. An unknown name is "
+           + "accepted silently: no motion, no error, action_id unchanged.")
+    }
+
     /// Emergency stop. Clears any motion first, then jumps the queue. Never gated on
     /// `canDrive` — it must work in every state.
     func emergencyStop() {
         stopDriving(reason: "e-stop")
         send(.eStop)
     }
+
+    /// Clears a latched e-stop.
+    ///
+    /// The e-stop latches and only `cmd|recover` releases it. Until this existed the app
+    /// could stop the robot but never start it again — which on a shooting day means power
+    /// cycling the robot between takes.
+    func recoverFromEStop() {
+        send(.recover)
+        note("recover sent — the e-stop latch should clear on the next status frame")
+    }
+
+    /// True when the robot is sitting in a latched e-stop and will ignore motion until it
+    /// is recovered.
+    var isLatched: Bool { status?.eStopLatched ?? false }
 
     // MARK: - Driving
 
